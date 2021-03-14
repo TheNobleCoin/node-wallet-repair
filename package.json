@@ -1,0 +1,55 @@
+{
+  "name": "turtlecoin-wallet-repair",
+  "version": "0.0.11",
+  "description": "TurtleCoin Wallet Repair Tool",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": "run.js",
+  "files": [
+    "dist/*",
+    "run.js"
+  ],
+  "scripts": {
+    "build": "./node_modules/.bin/tsc",
+    "test": "yarn style",
+    "style": "./node_modules/.bin/eslint src/**/*.ts",
+    "fix-style": "./node_modules/.bin/eslint --fix src/**/*.ts",
+    "prepublishOnly": "yarn build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/turtlecoin/node-wallet-repair.git"
+  },
+  "keywords": [
+    "TurtleCoin",
+    "Wallet",
+    "Repair",
+    "Tool"
+  ],
+  "author": "The TurtleCoin Developers",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "@turtlepay/logger": "^0.0.3",
+    "@types/node-fetch": "^2.5.8",
+    "dotenv": "^8.2.0",
+    "node-fetch": "^2.6.1",
+    "turtlecoin-wallet-backend": "^6.0.7"
+  },
+  "devDependencies": {
+    "@types/mocha": "^8.2.1",
+    "@types/node": "^14.14.34",
+    "@typescript-eslint/eslint-plugin": "^4.17.0",
+    "@typescript-eslint/parser": "^4.17.0",
+    "eslint": "^7.21.0",
+    "eslint-config-standard": "^16.0.2",
+    "eslint-plugin-import": "^2.22.1",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-promise": "^4.3.1",
+    "eslint-plugin-standard": "^4.0.1",
+    "mocha": "^8.3.2",
+    "ts-node": "^9.1.1",
+    "typedoc": "^0.20.30",
+    "typedoc-plugin-no-inherit": "^1.2.2",
+    "typescript": "^4.2.3"
+  }
+}
