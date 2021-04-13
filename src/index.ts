@@ -3,6 +3,7 @@ import { Logger } from '@turtlepay/logger';
 import * as path from 'path';
 import fetch from 'node-fetch';
 import * as fs from 'fs';
+import { TransactionInputJSON } from 'turtlecoin-wallet-backend/dist/lib/JsonSerialization';
 const pkg = require('../package.json');
 
 (async () => {
@@ -14,10 +15,24 @@ const pkg = require('../package.json');
         return;
     }
 
+    let dump = false;
+    let top = false;
+    let force = false;
+
+    for (const arg of process.argv) {
+        if (arg.toLowerCase() === 'dump') {
+            dump = true;
+        } else if (arg.toLowerCase() === 'top') {
+            top = true;
+        } else if (arg.toLowerCase() === 'force') {
+            force = true;
+        }
+    }
+
     const walletFilename = path.resolve(process.argv[2]);
     const walletPassword = process.argv[3];
-    const dump = (process.argv[4] && process.argv[4] === 'dump');
     const backupWalletFilename = walletFilename + '.backup';
+    const walletIsJson = walletFilename.endsWith('.json');
 
     if (!fs.existsSync(walletFilename)) {
         Logger.error('%s does not exist, please check the path and try again.', walletFilename);
@@ -25,8 +40,10 @@ const pkg = require('../package.json');
         return;
     }
 
-    if (fs.existsSync(backupWalletFilename)) {
-        Logger.error('Backup wallet file already exists! Refusing to continue with existing backup!');
+    if (fs.existsSync(backupWalletFilename) && !force) {
+        Logger.error('Backup wallet file already exists!');
+        Logger.error('Please move/rename the current backup file and try again');
+        Logger.error('If you really meant to do this, add "force" to the end of the arguments supplied');
 
         return;
     }
@@ -34,14 +51,34 @@ const pkg = require('../package.json');
     fs.copyFileSync(walletFilename, backupWalletFilename);
     Logger.warn('A backup of the wallet file has been created as: %s', backupWalletFilename);
 
+    const network_info = await fetch('https://blockapi.turtlepay.io/height');
+
+    if (!network_info.ok) {
+        Logger.error('Error retrieving current network height information. Please try again.');
+
+        return;
+    }
+
+    const network_height: {height: number, network_height: number} = await network_info.json();
+
     // set up a basic daemon connection
     const daemon = new Daemon('node.turtlepay.io', 443, true);
     Logger.info('Daemon connection established to: node.turtlepay.io:443');
 
-    // attempt to open the wallet
-    const [wallet, open_err] = await WalletBackend.openWalletFromFile(daemon, walletFilename, walletPassword);
+    let wallet, open_err;
+
+    if (!walletIsJson) {
+        // attempt to open the wallet
+        [wallet, open_err] = await WalletBackend.openWalletFromFile(daemon, walletFilename, walletPassword);
+    } else {
+        const file = fs.readFileSync(walletFilename).toString();
+
+        [wallet, open_err] = await WalletBackend.loadWalletFromJSON(daemon, file);
+    }
 
     if (open_err || !wallet) {
+        fs.unlinkSync(backupWalletFilename);
+
         Logger.error('Could not open wallet file using supplied password: %s', walletFilename);
 
         process.exit(1);
@@ -61,20 +98,14 @@ const pkg = require('../package.json');
     let end_height = 0;
 
     const init_json = JSON.parse(wallet.toJSONString());
-    const all_spent: Map<string, any> = new Map<string, any>();
     const all_unspent: Map<string, any> = new Map<string, any>();
 
     for (let i = 0; i < init_json.subWallets.subWallet.length; ++i) {
         Logger.info('Checking subwallet: %s', init_json.subWallets.subWallet[i].address);
 
-        const unspent = [];
-        const spent = [];
+        const unspent: TransactionInputJSON[] = [];
 
-        Logger.info('Found %s unspent inputs in wallet', init_json.subWallets.subWallet[i].unspentInputs.length);
-
-        for (let j = 0; j < init_json.subWallets.subWallet[i].unspentInputs.length; ++j) {
-            const input = init_json.subWallets.subWallet[i].unspentInputs[j];
-
+        const is_spent = async (input: TransactionInputJSON): Promise<void> => {
             if (input.blockHeight < start_height) {
                 start_height = input.blockHeight;
             }
@@ -96,14 +127,18 @@ const pkg = require('../package.json');
             } else {
                 const data = await response.json();
 
-                input.spendHeight = data.height;
-
                 Logger.info('Input with keyImage: %s marked as spent in block %s', input.keyImage, data.height);
-
-                all_spent.set(input.keyImage, data);
-
-                spent.push(input);
             }
+        };
+
+        Logger.info('Found %s unspent inputs in wallet', init_json.subWallets.subWallet[i].unspentInputs.length);
+
+        const promises = [];
+
+        for (let j = 0; j < init_json.subWallets.subWallet[i].unspentInputs.length; ++j) {
+            const input = init_json.subWallets.subWallet[i].unspentInputs[j];
+
+            promises.push(is_spent(input));
         }
 
         Logger.info('Found %s spent inputs in wallet', init_json.subWallets.subWallet[i].spentInputs.length);
@@ -111,35 +146,7 @@ const pkg = require('../package.json');
         for (let j = 0; j < init_json.subWallets.subWallet[i].spentInputs.length; ++j) {
             const input = init_json.subWallets.subWallet[i].spentInputs[j];
 
-            if (input.blockHeight < start_height) {
-                start_height = input.blockHeight;
-            }
-
-            if (input.blockHeight > end_height) {
-                end_height = input.blockHeight;
-            }
-
-            const response = await fetch('https://blockapi.turtlepay.io/keyImage/' + input.keyImage);
-
-            if (!response.ok) {
-                input.spendHeight = 0;
-
-                Logger.info('Input with keyImage: %s marked as unspent', input.keyImage);
-
-                all_unspent.set(input.keyImage, input);
-
-                unspent.push(input);
-            } else {
-                const data = await response.json();
-
-                input.spendHeight = data.height;
-
-                Logger.info('Input with keyImage: %s marked as spent in block %s', input.keyImage, data.height);
-
-                all_spent.set(input.keyImage, data);
-
-                spent.push(input);
-            }
+            promises.push(is_spent(input));
         }
 
         Logger.info('Found %s locked inputs in wallet', init_json.subWallets.subWallet[i].lockedInputs.length);
@@ -147,36 +154,10 @@ const pkg = require('../package.json');
         for (let j = 0; j < init_json.subWallets.subWallet[i].lockedInputs.length; ++j) {
             const input = init_json.subWallets.subWallet[i].lockedInputs[j];
 
-            if (input.blockHeight < start_height) {
-                start_height = input.blockHeight;
-            }
-
-            if (input.blockHeight > end_height) {
-                end_height = input.blockHeight;
-            }
-
-            const response = await fetch('https://blockapi.turtlepay.io/keyImage/' + input.keyImage);
-
-            if (!response.ok) {
-                input.spendHeight = 0;
-
-                Logger.info('Input with keyImage: %s marked as unspent', input.keyImage);
-
-                all_unspent.set(input.keyImage, input);
-
-                unspent.push(input);
-            } else {
-                const data = await response.json();
-
-                input.spendHeight = data.height;
-
-                Logger.info('Input with keyImage: %s marked as spent in block %s', input.keyImage, data.height);
-
-                all_spent.set(input.keyImage, data);
-
-                spent.push(input);
-            }
+            promises.push(is_spent(input));
         }
+
+        await Promise.all(promises);
 
         Logger.info('Updating subwallet structure...');
 
@@ -250,6 +231,10 @@ const pkg = require('../package.json');
         lastKnownBlockHeight: init_json.walletSynchronizer.startHeight
     };
 
+    if (top) {
+        init_json.walletSynchronizer.transactionSynchronizerStatus.lastKnownBlockHeight = network_height.network_height;
+    }
+
     Logger.warn('The transaction history of the wallet has been altered!');
 
     const str = JSON.stringify(init_json, null, 4);
@@ -274,15 +259,23 @@ const pkg = require('../package.json');
     const final_balance = final_unlocked + final_locked;
 
     Logger.warn('Wallet now reports a balance of: %s', prettyPrintAmount(final_balance));
-    Logger.warn('This balance is likely different than what you expected, but it is the balance of unspent funds.')
+    Logger.warn('This balance is likely different than what you expected, but it is the balance of unspent funds.');
 
     Logger.warn('Saving updated wallet...');
 
-    await final_wallet.saveWalletToFile(walletFilename, walletPassword);
+    if (!walletIsJson) {
+        await final_wallet.saveWalletToFile(walletFilename, walletPassword);
+    } else {
+        const json = final_wallet.toJSONString();
+
+        fs.writeFileSync(walletFilename, json);
+
+        await final_wallet.saveWalletToFile(walletFilename.replace('.json', ''), walletPassword);
+    }
 
     Logger.warn('Transactions as found in the wallet may not match transactions as provided on block explorers');
     Logger.warn('You may now re-open the wallet file in your usual wallet software.');
-    Logger.warn('THe wallet had inputs starting at block %s that were checked', start_height);
+    Logger.warn('The wallet had inputs starting at block %s that were checked', start_height);
     Logger.warn('The wallet will begin re-scanning at block %s', init_json.walletSynchronizer.startHeight);
     Logger.warn('Once the scanning is complete, please move ALL remaining funds to a NEW wallet.');
 })();

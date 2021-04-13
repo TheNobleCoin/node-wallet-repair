@@ -1,6 +1,6 @@
 {
   "name": "turtlecoin-wallet-repair",
-  "version": "0.0.11",
+  "version": "0.0.16",
   "description": "TurtleCoin Wallet Repair Tool",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
