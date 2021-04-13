@@ -1,9 +1,21 @@
 # TurtleCoin Wallet Repair Tool
 
-In the event that you have wallet wherein you cannot send any transactions or optimize the wallet due to 
-"Transaction Input Already Spent" errors and you've tried rewinding, resynching, and everything you can think
-of to get access to your funds, this tool is designed for one purpose: allowing you to spend
-any unspent funds in the wallet by using a sledge hammer to correct data inconsistencies.
+This tool is designed to help you regain access to funds due to various forms of wallet corruption. The causes for
+corrupt can vary and the types of corruption can range from errors when sending, wallet software crashing when
+using the wallet, or other undefined behavior.
+
+Examples of problems include:
+
+* "Transaction Input Has Already Been Spent" errors
+* Perpetually locked funds
+* Wallet software instability (crashes a lot when using the wallet file)
+
+If you've tried everything including rewinding, resyncing, importing from 0, optimizing, and etc this tool may help 
+you finally get somewhere.
+
+The method in which this tool operates is to prune (remove) spent inputs from the wallet file, re-write the
+internal transaction history of the wallet file (does not change the blockchain) which ultimately allows access to
+any unspent funds in the wallet. To be clear, *this tool is a sledge hammer mounted to a wrecking ball*.
 
 What this tool does:
 
@@ -17,8 +29,9 @@ outputs in the file.
   * **Transaction history in the wallet software is unlikely to match the previous history or a transaction as shown 
     in the [Block Explorer](https://explorer.turtlecoin.lol)**
 * Sets the scan height of the wallet to the block **after** the block of highest block found in the wallet file.
-* Saves the wallet file such that it can be opened in Zedwallet or Proton
-* Allows you to get the remaining unspent funds out of the wallet and into a new wallet
+  * Alternatively, you can set it to the top block of the network by specifying `top` in your CLI arguments
+* Saves the wallet file such that it can be opened in Zedwallet, Proton, or Wallet-API
+* Allows you to get the remaining unspent funds out of the wallet (if everything worked as expected)
 
 **It is very likely that the resulting balance will not match the previous balance displayed by the wallets. This
 is expected behavior as the data inconsistencies that are resolved resulted in wallet software displaying an incorrect 
@@ -48,6 +61,9 @@ What this tool does **not** do:
 
 Sync your wallet file to 100% and **save** it.
 
+**Note:** If it is not possible to sync to 100% and save the file, you've got some work cut out for you. See the notes below
+for a method that *may* help.
+
 It doesn't matter if you sync from 0 or from the scan-height of just before you started receiving funds.
 
 #### Step 2
@@ -59,7 +75,17 @@ It doesn't matter if you sync from 0 or from the scan-height of just before you 
 #### Step 3
 
 ```bash
-> turtlecoin-wallet-repair <wallet-file> <wallet-password>
+> turtlecoin-wallet-repair <wallet-file> <wallet-password> [dump] [top]
+```
+
+##### Note
+```
+Specifying "dump" in the CLI arguments will also dump the resulting file to JSON.
+
+Specifying "top" in the CLI arguments will set the scan height to the top of the
+chain when the process is complete.
+
+You can specify one or both of these options in any order AFTER the wallet-file and wallet-password parameters
 ```
 
 Allow the tool to run against the file. Depending on how many inputs are in the file, this could be a fast process
@@ -104,7 +130,9 @@ marked them as **spent**. See the problem?
 
 #### Step 4
 
-Open the wallet file using Zedwallet or Proton (GUI). Attempt to **send_all** to a new wallet address.
+Open the wallet file using Zedwallet or Proton (GUI). Attempt to **send_all** to a new wallet address or the same wallet
+address but **be sure to mark down the height of the block in which the transaction was recorded, as this will be your
+new scan from height when restoring/resetting/resyncing the wallet in the future**.
 
 If the process fails, you will likely need to **optimize** the wallet first before attempting to **send_all** again.
 
