@@ -4,7 +4,47 @@ import * as path from 'path';
 import fetch from 'node-fetch';
 import * as fs from 'fs';
 import { TransactionInputJSON } from 'turtlecoin-wallet-backend/dist/lib/JsonSerialization';
+import { AbortController } from 'abort-controller';
 const pkg = require('../package.json');
+
+interface IKeyImage {
+    keyImage: string;
+    block: string;
+    height: number;
+    timestamp: number;
+    tx: string;
+    publicKey: string;
+    fee: number;
+    paymentID: string;
+    unlockTime: number;
+    amount: number;
+}
+
+const checkKeyImage = async (keyImage: string, attempt = 0): Promise<IKeyImage | undefined> => {
+    const sleep = async (timeout: number) => new Promise(resolve => setTimeout(resolve, timeout));
+
+    const controller = new AbortController();
+
+    const timeout = setTimeout(() => {
+        controller.abort();
+    }, 5000);
+
+    try {
+        const response = await fetch('https://blockapi.turtlepay.io/keyImage/' + keyImage, {
+            signal: controller.signal
+        });
+
+        clearTimeout(timeout);
+
+        if (response.ok) {
+            return response.json();
+        }
+    } catch (e: any) {
+        await sleep(10 * 1000);
+
+        return checkKeyImage(keyImage, ++attempt);
+    }
+};
 
 (async () => {
     Logger.info('TurtleCoin Wallet Repair Utility v%s', pkg.version);
@@ -105,6 +145,8 @@ const pkg = require('../package.json');
 
         const unspent: TransactionInputJSON[] = [];
 
+        let checked = 0;
+
         const is_spent = async (input: TransactionInputJSON): Promise<void> => {
             if (input.blockHeight < start_height) {
                 start_height = input.blockHeight;
@@ -114,31 +156,29 @@ const pkg = require('../package.json');
                 end_height = input.blockHeight;
             }
 
-            const response = await fetch('https://blockapi.turtlepay.io/keyImage/' + input.keyImage);
+            const image = await checkKeyImage(input.keyImage);
 
-            if (!response.ok) {
+            if (!image) {
                 input.spendHeight = 0;
 
-                Logger.info('Input with keyImage: %s marked as unspent', input.keyImage);
+                Logger.info('[%s] Input with keyImage: %s marked as unspent', ++checked, input.keyImage);
 
                 all_unspent.set(input.keyImage, input);
 
                 unspent.push(input);
             } else {
-                const data = await response.json();
-
-                Logger.info('Input with keyImage: %s marked as spent in block %s', input.keyImage, data.height);
+                Logger.info('[%s] Input with keyImage: %s marked as spent in block %s', ++checked, input.keyImage, image.height);
             }
         };
 
         Logger.info('Found %s unspent inputs in wallet', init_json.subWallets.subWallet[i].unspentInputs.length);
 
-        const promises = [];
+        const inputs: TransactionInputJSON[] = [];
 
         for (let j = 0; j < init_json.subWallets.subWallet[i].unspentInputs.length; ++j) {
             const input = init_json.subWallets.subWallet[i].unspentInputs[j];
 
-            promises.push(is_spent(input));
+            inputs.push(input);
         }
 
         Logger.info('Found %s spent inputs in wallet', init_json.subWallets.subWallet[i].spentInputs.length);
@@ -146,7 +186,7 @@ const pkg = require('../package.json');
         for (let j = 0; j < init_json.subWallets.subWallet[i].spentInputs.length; ++j) {
             const input = init_json.subWallets.subWallet[i].spentInputs[j];
 
-            promises.push(is_spent(input));
+            inputs.push(input);
         }
 
         Logger.info('Found %s locked inputs in wallet', init_json.subWallets.subWallet[i].lockedInputs.length);
@@ -154,10 +194,18 @@ const pkg = require('../package.json');
         for (let j = 0; j < init_json.subWallets.subWallet[i].lockedInputs.length; ++j) {
             const input = init_json.subWallets.subWallet[i].lockedInputs[j];
 
-            promises.push(is_spent(input));
+            inputs.push(input);
         }
 
-        await Promise.all(promises);
+        const interval = setInterval(() => {
+            Logger.warn('Checking key images... please wait... [%s/%s]', checked, inputs.length);
+        }, 5000);
+
+        for (const input of inputs) {
+            await is_spent(input);
+        }
+
+        clearInterval(interval);
 
         Logger.info('Updating subwallet structure...');
 

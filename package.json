@@ -1,6 +1,6 @@
 {
   "name": "turtlecoin-wallet-repair",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "TurtleCoin Wallet Repair Tool",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -31,6 +31,7 @@
   "dependencies": {
     "@turtlepay/logger": "^0.0.3",
     "@types/node-fetch": "^2.5.8",
+    "abort-controller": "^3.0.0",
     "dotenv": "^8.2.0",
     "node-fetch": "^2.6.1",
     "turtlecoin-wallet-backend": "^6.0.7"
